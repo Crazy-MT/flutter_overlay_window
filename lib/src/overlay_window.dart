@@ -122,7 +122,7 @@ class FlutterOverlayWindow {
     int height,
     bool enableDrag,
   ) async {
-    final bool? _res = await _overlayChannel.invokeMethod<bool?>(
+    final bool? _res = await _channel.invokeMethod<bool?>(
       'resizeOverlay',
       {
         'width': width,

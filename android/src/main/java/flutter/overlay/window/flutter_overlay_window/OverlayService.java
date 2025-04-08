@@ -250,6 +250,28 @@ public class OverlayService extends Service implements View.OnTouchListener {
         }
     }
 
+    public static boolean resizeOverlay(int width, int height, boolean enableDrag) {
+        if (instance != null && instance.flutterView != null) {
+            if (instance.windowManager != null) {
+//                WindowManager.LayoutParams params = (WindowManager.LayoutParams) instance.flutterView.getLayoutParams();
+//                params.x = (x == -1999 || x == -1) ? -1 : instance.dpToPx(x);
+//                params.y = instance.dpToPx(y);
+//                instance.windowManager.updateViewLayout(instance.flutterView, params);
+
+                WindowManager.LayoutParams params = (WindowManager.LayoutParams) instance.flutterView.getLayoutParams();
+                params.width = (width == -1999 || width == -1) ? -1 : instance.dpToPx(width);
+                params.height = (height != 1999 || height != -1) ? instance.dpToPx(height) : height;
+                WindowSetup.enableDrag = enableDrag;
+                instance.windowManager.updateViewLayout(instance.flutterView, params);
+                return true;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+
     private void moveOverlay(int x, int y, MethodChannel.Result result) {
         if (windowManager != null) {
             WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();

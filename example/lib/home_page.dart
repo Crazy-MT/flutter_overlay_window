@@ -72,7 +72,7 @@ class _HomePageState extends State<HomePage> {
                   flag: OverlayFlag.defaultFlag,
                   visibility: NotificationVisibility.visibilityPublic,
                   positionGravity: PositionGravity.auto,
-                  height: (MediaQuery.of(context).size.height * 0.6).toInt(),
+                  height: (MediaQuery.of(context).size.height * 0.9).toInt(),
                   width: WindowSize.matchParent,
                   startPosition: const OverlayPosition(0, -259),
                 );
@@ -92,8 +92,8 @@ class _HomePageState extends State<HomePage> {
               onPressed: () async {
                 await FlutterOverlayWindow.resizeOverlay(
                   WindowSize.matchParent,
-                  (MediaQuery.of(context).size.height * 5).toInt(),
-                  false,
+                  (MediaQuery.of(context).size.height * 0.2).toInt(),
+                  true,
                 );
               },
               child: const Text("Update Overlay"),
