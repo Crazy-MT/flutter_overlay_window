@@ -23,6 +23,8 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.LinearLayout;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -69,6 +71,14 @@ public class OverlayService extends Service implements View.OnTouchListener {
     private Timer mTrayAnimationTimer;
     private TrayAnimationTimerTask mTrayTimerTask;
 
+    private LinearLayout buttonContainer;
+    private Button moveButton;
+    private Button resizeButton;
+    private float moveLastX, moveLastY;
+    private float resizeLastX, resizeLastY;
+    private boolean isMoving = false;
+    private boolean isResizing = false;
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -81,6 +91,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
         Log.d("OverLay", "Destroying the overlay window service");
         if (windowManager != null) {
             windowManager.removeView(flutterView);
+            windowManager.removeView(buttonContainer);
             windowManager = null;
             flutterView.detachFromFlutterEngine();
             flutterView = null;
@@ -89,6 +100,24 @@ public class OverlayService extends Service implements View.OnTouchListener {
         NotificationManager notificationManager = (NotificationManager) getApplicationContext().getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.cancel(OverlayConstants.NOTIFICATION_ID);
         instance = null;
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
+    private void updateButtonPosition() {
+        if (windowManager != null && buttonContainer != null) {
+            WindowManager.LayoutParams flutterParams = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+            WindowManager.LayoutParams buttonParams = (WindowManager.LayoutParams) buttonContainer.getLayoutParams();
+
+// 将按钮放在 flutterView 正下方
+            buttonParams.x = flutterParams.x;
+            buttonParams.y = flutterParams.y + (flutterParams.height == -1 ? screenHeight() : flutterParams.height);
+//            buttonParams.y = flutterParams.y; //  这个高度不对
+            System.out.println("OverlayService.updateButtonPosition" + flutterParams.y + " " + flutterParams.height);
+
+            // 添加一个小的间距（可选）
+//            buttonParams.y += dpToPx(10);
+            windowManager.updateViewLayout(buttonContainer, buttonParams);
+        }
     }
 
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
@@ -155,6 +184,89 @@ public class OverlayService extends Service implements View.OnTouchListener {
         }
         int dx = startX == OverlayConstants.DEFAULT_XY ? 0 : startX;
         int dy = startY == OverlayConstants.DEFAULT_XY ? -statusBarHeightPx() : startY;
+
+        // 创建按钮容器和按钮
+        buttonContainer = new LinearLayout(getApplicationContext());
+        buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
+
+        moveButton = new Button(getApplicationContext());
+        moveButton.setText("Drag to Move");
+        moveButton.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        moveLastX = event.getRawX();
+                        moveLastY = event.getRawY();
+                        isMoving = true;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        if (isMoving) {
+                            float dx = event.getRawX() - moveLastX;
+                            float dy = event.getRawY() - moveLastY;
+                            moveLastX = event.getRawX();
+                            moveLastY = event.getRawY();
+                            params.x += dx;
+                            params.y += dy;
+                            windowManager.updateViewLayout(flutterView, params);
+                            updateButtonPosition();
+                        }
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        isMoving = false;
+                        return true;
+                }
+                return false;
+            }
+        });
+        resizeButton = new Button(getApplicationContext());
+        resizeButton.setText("Drag to Resize");
+        resizeButton.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        resizeLastX = event.getRawX();
+                        resizeLastY = event.getRawY();
+                        isResizing = true;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        if (isResizing) {
+                            float dx = event.getRawX() - resizeLastX;
+                            float dy = event.getRawY() - resizeLastY;
+                            resizeLastX = event.getRawX();
+                            resizeLastY = event.getRawY();
+
+                            // 计算新的宽高
+                            int newWidth = params.width == -1 ? dpToPx(200) : params.width + (int)dx;
+                            int newHeight = params.height == -1 ? dpToPx(200) : params.height + (int)dy;
+
+                            // 设置最小尺寸限制
+                            newWidth = Math.max(newWidth, dpToPx(100));
+                            newHeight = Math.max(newHeight, dpToPx(100));
+
+                            params.width = newWidth;
+                            params.height = newHeight;
+                            windowManager.updateViewLayout(flutterView, params);
+
+                            updateButtonPosition(); // 更新按钮位置
+                        }
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        isResizing = false;
+                        return true;
+                }
+                return false;
+            }
+        });
+// 将按钮添加到容器
+        buttonContainer.addView(moveButton);
+        buttonContainer.addView(resizeButton);
+
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowSetup.width == -1999 ? -1 : WindowSetup.width,
                 WindowSetup.height != -1999 ? WindowSetup.height : screenHeight(),
@@ -167,13 +279,30 @@ public class OverlayService extends Service implements View.OnTouchListener {
                         | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT
         );
+
+        WindowManager.LayoutParams buttonParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                0,
+                0,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+        );
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
             params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
         }
         params.gravity = WindowSetup.gravity;
+        buttonParams.gravity = WindowSetup.gravity;
+
         flutterView.setOnTouchListener(this);
         windowManager.addView(flutterView, params);
+        windowManager.addView(buttonContainer, buttonParams);
         moveOverlay(dx, dy, null);
+        updateButtonPosition(); // 确保初始位置正确
         return START_STICKY;
     }
 
@@ -278,6 +407,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
             params.x = (x == -1999 || x == -1) ? -1 : dpToPx(x);
             params.y = dpToPx(y);
             windowManager.updateViewLayout(flutterView, params);
+            updateButtonPosition(); // 更新按钮位置
             if (result != null)
                 result.success(true);
         } else {

@@ -26,9 +26,19 @@ class _TrueCallerOverlayState extends State<TrueCallerOverlay> {
     Color(0xFFAEB2B8),
   ];
 
+  // 用于拖动的变量
+  Offset? _moveStartPosition;
+  Offset? _resizeStartPosition;
+  double initialWidth = 300.0;  // 初始宽度
+  double initialHeight = 400.0; // 初始高度
+
   @override
   void initState() {
     super.initState();
+    // 初始化时获取当前悬浮窗位置
+    // FlutterOverlayWindow.getOverlayPosition().then((value) {
+    //   log("Initial Overlay Position: $value");
+    // });
   }
 
   @override
@@ -39,6 +49,7 @@ class _TrueCallerOverlayState extends State<TrueCallerOverlay> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12.0),
           width: double.infinity,
+          // height: double.infinity,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
@@ -80,7 +91,6 @@ class _TrueCallerOverlayState extends State<TrueCallerOverlay> {
                       ),
                       subtitle: const Text("Sousse , Tunisia"),
                     ),
-                    const Spacer(),
                     const Divider(color: Colors.black54),
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 12.0),
@@ -101,7 +111,88 @@ class _TrueCallerOverlayState extends State<TrueCallerOverlay> {
                           ),
                         ],
                       ),
-                    )
+                    ),
+                    // 添加控制按钮
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          // 移动按钮
+                          GestureDetector(
+                            onPanStart: (details) {
+                              _moveStartPosition = details.globalPosition;
+                            },
+                            onPanUpdate: (details) async {
+                              if (_moveStartPosition != null) {
+                                final currentPos = await FlutterOverlayWindow.getOverlayPosition();
+                                double newX = (currentPos?.x ?? 0.0) + details.delta.dx;
+                                double newY = (currentPos?.y ?? 0.0) + details.delta.dy;
+                                await FlutterOverlayWindow.moveOverlay(
+                                    OverlayPosition(newX, newY)
+                                );
+                              }
+                            },
+                            onPanEnd: (details) {
+                              _moveStartPosition = null;
+                              FlutterOverlayWindow.getOverlayPosition().then((value) {
+                                log("New Overlay Position: $value");
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0, vertical: 8.0),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(8.0),
+                              ),
+                              child: const Text(
+                                "Drag to Move",
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ),
+                          // 缩放按钮
+                          GestureDetector(
+                            onPanStart: (details) {
+                              _resizeStartPosition = details.globalPosition;
+                            },
+                            onPanUpdate: (details) async {
+                              if (_resizeStartPosition != null) {
+                                initialWidth += details.delta.dx;
+                                initialHeight += details.delta.dy;
+                                // 设置最小尺寸限制
+                                initialWidth = initialWidth.clamp(150.0, double.infinity);
+                                initialHeight = initialHeight.clamp(200.0, double.infinity);
+                                await FlutterOverlayWindow.resizeOverlay(
+                                  initialWidth.round(),
+                                  initialHeight.round(),
+                                  true,
+                                );
+                                setState(() {}); // 更新UI
+                              }
+                            },
+                            onPanEnd: (details) {
+                              _resizeStartPosition = null;
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16.0, vertical: 8.0),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(8.0),
+                              ),
+                              child: const Text(
+                                "Drag to Resize",
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+
                   ],
                 ),
                 Positioned(
