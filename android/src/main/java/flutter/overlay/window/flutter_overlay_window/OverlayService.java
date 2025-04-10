@@ -110,9 +110,12 @@ public class OverlayService extends Service implements View.OnTouchListener {
 
 // 将按钮放在 flutterView 正下方
             buttonParams.x = flutterParams.x;
-            buttonParams.y = flutterParams.y + (flutterParams.height == -1 ? screenHeight() : flutterParams.height);
-//            buttonParams.y = flutterParams.y; //  这个高度不对
-            System.out.println("OverlayService.updateButtonPosition" + flutterParams.y + " " + flutterParams.height);
+            /*buttonParams.y = flutterParams.y + (flutterParams.height == -1 ? screenHeight() : flutterParams.height);
+            System.out.println("OverlayService.updateButtonPosition" + flutterParams.y + " " + flutterParams.height);*/
+
+            // 使用 flutterView 的实际高度，而不是 screenHeight()
+            int flutterHeight = flutterParams.height == -1 ? flutterView.getHeight() : flutterParams.height;
+            buttonParams.y = flutterParams.y + flutterHeight;
 
             // 添加一个小的间距（可选）
 //            buttonParams.y += dpToPx(10);
@@ -188,6 +191,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
         // 创建按钮容器和按钮
         buttonContainer = new LinearLayout(getApplicationContext());
         buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
+        buttonContainer.setBackgroundColor(Color.BLACK);
 
         moveButton = new Button(getApplicationContext());
         moveButton.setText("Drag to Move");
@@ -301,8 +305,9 @@ public class OverlayService extends Service implements View.OnTouchListener {
         flutterView.setOnTouchListener(this);
         windowManager.addView(flutterView, params);
         windowManager.addView(buttonContainer, buttonParams);
+        flutterView.post(() -> updateButtonPosition()); // 等待 flutterView 布局完成
         moveOverlay(dx, dy, null);
-        updateButtonPosition(); // 确保初始位置正确
+//        updateButtonPosition(); // 确保初始位置正确
         return START_STICKY;
     }
 
