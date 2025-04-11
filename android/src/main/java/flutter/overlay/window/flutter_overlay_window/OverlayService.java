@@ -1,5 +1,6 @@
 package flutter.overlay.window.flutter_overlay_window;
 
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -24,6 +25,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 
 import androidx.annotation.Nullable;
@@ -72,8 +74,6 @@ public class OverlayService extends Service implements View.OnTouchListener {
     private TrayAnimationTimerTask mTrayTimerTask;
 
     private LinearLayout buttonContainer;
-    private Button moveButton;
-    private Button resizeButton;
     private float moveLastX, moveLastY;
     private float resizeLastX, resizeLastY;
     private boolean isMoving = false;
@@ -115,7 +115,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
 
             // 使用 flutterView 的实际高度，而不是 screenHeight()
             int flutterHeight = flutterParams.height == -1 ? flutterView.getHeight() : flutterParams.height;
-            buttonParams.y = flutterParams.y + flutterHeight;
+            buttonParams.y = flutterParams.y + flutterHeight / 2;
 
             // 添加一个小的间距（可选）
 //            buttonParams.y += dpToPx(10);
@@ -123,6 +123,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
         }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -131,22 +132,10 @@ public class OverlayService extends Service implements View.OnTouchListener {
         int startY = intent.getIntExtra("startY", OverlayConstants.DEFAULT_XY);
         boolean isCloseWindow = intent.getBooleanExtra(INTENT_EXTRA_IS_CLOSE_WINDOW, false);
         if (isCloseWindow) {
-            if (windowManager != null) {
-                windowManager.removeView(flutterView);
-                windowManager = null;
-                flutterView.detachFromFlutterEngine();
-                stopSelf();
-            }
-            isRunning = false;
+            closeOverlayWindow(false);
             return START_STICKY;
         }
-        if (windowManager != null) {
-            windowManager.removeView(flutterView);
-            windowManager = null;
-            flutterView.detachFromFlutterEngine();
-            stopSelf();
-        }
-        isRunning = true;
+        closeOverlayWindow(true);
         Log.d("onStartCommand", "Service started");
         FlutterEngine engine = FlutterEngineCache.getInstance().get(OverlayConstants.CACHED_TAG);
         engine.getLifecycleChannel().appIsResumed();
@@ -191,85 +180,108 @@ public class OverlayService extends Service implements View.OnTouchListener {
         // 创建按钮容器和按钮
         buttonContainer = new LinearLayout(getApplicationContext());
         buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
-        buttonContainer.setBackgroundColor(Color.BLACK);
+        buttonContainer.setBackgroundColor(Color.TRANSPARENT); // Optional: ensure container is transparent
 
-        moveButton = new Button(getApplicationContext());
-        moveButton.setText("Drag to Move");
-        moveButton.setOnTouchListener(new View.OnTouchListener() {
+        ImageView closeIV = new ImageView(getApplicationContext());
+        closeIV.setImageResource(R.drawable.icon_menu_chat_close); // Replace with your move icon resource
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
+                dpToPx(24), // Width in pixels (adjust as needed)
+                dpToPx(24)  // Height in pixels (adjust as needed)
+        );
+        closeParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
+        closeIV.setLayoutParams(closeParams);
+        closeIV.setOnClickListener(new View.OnClickListener() {
             @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
+            public void onClick(View v) {
+                closeOverlayWindow(false);
+            }
+        });
+
+        ImageView moveImageView = new ImageView(getApplicationContext());
+        moveImageView.setImageResource(R.drawable.icon_menu_chat_position); // Replace with your move icon resource
+        LinearLayout.LayoutParams moveParams = new LinearLayout.LayoutParams(
+                dpToPx(24), // Width in pixels (adjust as needed)
+                dpToPx(24)  // Height in pixels (adjust as needed)
+        );
+        moveParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
+        moveImageView.setLayoutParams(moveParams);
+        moveImageView.setOnTouchListener((v, event) -> {
+            WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    moveLastX = event.getRawX();
+                    moveLastY = event.getRawY();
+                    isMoving = true;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (isMoving) {
+                        float dx12 = event.getRawX() - moveLastX;
+                        float dy12 = event.getRawY() - moveLastY;
                         moveLastX = event.getRawX();
                         moveLastY = event.getRawY();
-                        isMoving = true;
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        if (isMoving) {
-                            float dx = event.getRawX() - moveLastX;
-                            float dy = event.getRawY() - moveLastY;
-                            moveLastX = event.getRawX();
-                            moveLastY = event.getRawY();
-                            params.x += dx;
-                            params.y += dy;
-                            windowManager.updateViewLayout(flutterView, params);
-                            updateButtonPosition();
-                        }
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        isMoving = false;
-                        return true;
-                }
-                return false;
+                        params.x += dx12;
+                        params.y += dy12;
+                        windowManager.updateViewLayout(flutterView, params);
+                        updateButtonPosition();
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    isMoving = false;
+                    return true;
             }
+            return false;
         });
-        resizeButton = new Button(getApplicationContext());
-        resizeButton.setText("Drag to Resize");
-        resizeButton.setOnTouchListener(new View.OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
+
+        ImageView resizeImageView = new ImageView(getApplicationContext());
+        resizeImageView.setImageResource(R.drawable.icon_menu_chat_drag);
+        LinearLayout.LayoutParams resizeParams = new LinearLayout.LayoutParams(
+                dpToPx(24), // Width in pixels (adjust as needed)
+                dpToPx(24)  // Height in pixels (adjust as needed)
+        );
+        resizeParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
+        resizeImageView.setLayoutParams(resizeParams);
+        resizeImageView.setOnTouchListener((v, event) -> {
+            WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    resizeLastX = event.getRawX();
+                    resizeLastY = event.getRawY();
+                    isResizing = true;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (isResizing) {
+                        float dx1 = event.getRawX() - resizeLastX;
+                        float dy1 = event.getRawY() - resizeLastY;
                         resizeLastX = event.getRawX();
                         resizeLastY = event.getRawY();
-                        isResizing = true;
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        if (isResizing) {
-                            float dx = event.getRawX() - resizeLastX;
-                            float dy = event.getRawY() - resizeLastY;
-                            resizeLastX = event.getRawX();
-                            resizeLastY = event.getRawY();
 
-                            // 计算新的宽高
-                            int newWidth = params.width == -1 ? dpToPx(200) : params.width + (int)dx;
-                            int newHeight = params.height == -1 ? dpToPx(200) : params.height + (int)dy;
+                        // 计算新的宽高
+                        int newWidth = params.width == -1 ? dpToPx(200) : params.width + (int) dx1;
+                        int newHeight = params.height == -1 ? dpToPx(200) : params.height + (int) dy1;
 
-                            // 设置最小尺寸限制
-                            newWidth = Math.max(newWidth, dpToPx(100));
-                            newHeight = Math.max(newHeight, dpToPx(100));
+                        // 设置最小尺寸限制
+                        newWidth = Math.max(newWidth, dpToPx(100));
+                        newHeight = Math.max(newHeight, dpToPx(100));
 
-                            params.width = newWidth;
-                            params.height = newHeight;
-                            windowManager.updateViewLayout(flutterView, params);
+                        params.width = newWidth;
+                        params.height = newHeight;
+                        windowManager.updateViewLayout(flutterView, params);
 
-                            updateButtonPosition(); // 更新按钮位置
-                        }
-                        return true;
-                    case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
-                        isResizing = false;
-                        return true;
-                }
-                return false;
+                        updateButtonPosition(); // 更新按钮位置
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    isResizing = false;
+                    return true;
             }
+            return false;
         });
-// 将按钮添加到容器
-        buttonContainer.addView(moveButton);
-        buttonContainer.addView(resizeButton);
+
+        buttonContainer.addView(closeIV);
+        buttonContainer.addView(moveImageView);
+        buttonContainer.addView(resizeImageView);
 
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowSetup.width == -1999 ? -1 : WindowSetup.width,
@@ -305,10 +317,21 @@ public class OverlayService extends Service implements View.OnTouchListener {
         flutterView.setOnTouchListener(this);
         windowManager.addView(flutterView, params);
         windowManager.addView(buttonContainer, buttonParams);
-        flutterView.post(() -> updateButtonPosition()); // 等待 flutterView 布局完成
+        flutterView.post(this::updateButtonPosition); // 等待 flutterView 布局完成
         moveOverlay(dx, dy, null);
 //        updateButtonPosition(); // 确保初始位置正确
         return START_STICKY;
+    }
+
+    private void closeOverlayWindow(boolean isRunning) {
+        if (windowManager != null) {
+            windowManager.removeView(flutterView);
+            windowManager.removeView(buttonContainer);
+            windowManager = null;
+            flutterView.detachFromFlutterEngine();
+            stopSelf();
+        }
+        OverlayService.isRunning = isRunning;
     }
 
 
@@ -406,6 +429,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
         }
     }
 
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     private void moveOverlay(int x, int y, MethodChannel.Result result) {
         if (windowManager != null) {
             WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
