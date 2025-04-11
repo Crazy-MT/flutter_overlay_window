@@ -28,6 +28,7 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.NotificationCompat;
@@ -79,6 +80,12 @@ public class OverlayService extends Service implements View.OnTouchListener {
     private boolean isMoving = false;
     private boolean isResizing = false;
 
+    // ... Existing fields ...
+    private ImageView floatingIcon;
+    private boolean isIconMode = false;
+    private float iconLastX, iconLastY;
+    private boolean iconDragging;
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -90,16 +97,26 @@ public class OverlayService extends Service implements View.OnTouchListener {
     public void onDestroy() {
         Log.d("OverLay", "Destroying the overlay window service");
         if (windowManager != null) {
-            windowManager.removeView(flutterView);
-            windowManager.removeView(buttonContainer);
+            if (flutterView != null) {
+                windowManager.removeView(flutterView);
+                flutterView.detachFromFlutterEngine();
+                flutterView = null;
+            }
+            if (buttonContainer != null) {
+                windowManager.removeView(buttonContainer);
+                buttonContainer = null;
+            }
+            if (floatingIcon != null) {
+                windowManager.removeView(floatingIcon);
+                floatingIcon = null;
+            }
             windowManager = null;
-            flutterView.detachFromFlutterEngine();
-            flutterView = null;
         }
         isRunning = false;
         NotificationManager notificationManager = (NotificationManager) getApplicationContext().getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.cancel(OverlayConstants.NOTIFICATION_ID);
         instance = null;
+        super.onDestroy();
     }
 
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
@@ -125,6 +142,167 @@ public class OverlayService extends Service implements View.OnTouchListener {
 
     @SuppressLint("ClickableViewAccessibility")
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
+    private void showFloatingIcon() {
+        floatingIcon = new ImageView(getApplicationContext());
+        floatingIcon.setImageResource(R.drawable.visible); // Replace with your icon resource
+        int iconSize = dpToPx(48); // Adjust size as needed
+
+        WindowManager.LayoutParams iconParams = new WindowManager.LayoutParams(
+                iconSize,
+                iconSize,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+        );
+        iconParams.gravity = Gravity.TOP | Gravity.LEFT;
+        iconParams.x = szWindow.x - iconSize; // Start at right edge
+        iconParams.y = szWindow.y / 2; // Middle of screen vertically
+
+        floatingIcon.setOnLongClickListener(v -> {
+            stopSelf();
+            return true;
+        });
+
+        // Dragging logic
+        floatingIcon.setOnTouchListener((v, event) -> {
+            WindowManager.LayoutParams params = (WindowManager.LayoutParams) floatingIcon.getLayoutParams();
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    iconDragging = false;
+                    iconLastX = event.getRawX();
+                    iconLastY = event.getRawY();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float dx = event.getRawX() - iconLastX;
+                    float dy = event.getRawY() - iconLastY;
+                    if (!iconDragging && dx * dx + dy * dy < 25) {
+                        return true;
+                    }
+                    iconLastX = event.getRawX();
+                    iconLastY = event.getRawY();
+                    params.x += (int) dx;
+                    params.y += (int) dy;
+                    windowManager.updateViewLayout(floatingIcon, params);
+                    iconDragging = true;
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!iconDragging) {
+                        // Handle click to reopen overlay
+                        reopenOverlay();
+                    }
+                    iconDragging = false;
+                    return true;
+            }
+            return false;
+        });
+
+        windowManager.addView(floatingIcon, iconParams);
+
+        // Snap to edge after dragging
+        floatingIcon.post(() -> snapIconToEdge());
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
+    private void snapIconToEdge() {
+        if (floatingIcon == null || windowManager == null) return;
+        WindowManager.LayoutParams params = (WindowManager.LayoutParams) floatingIcon.getLayoutParams();
+        int iconSize = floatingIcon.getWidth();
+        int screenWidth = szWindow.x;
+
+        // Snap to nearest edge (left or right)
+        params.x = params.x + (iconSize / 2) <= screenWidth / 2 ? 0 : screenWidth - iconSize;
+
+        // Keep y within bounds
+        params.y = Math.max(0, Math.min(params.y, szWindow.y - iconSize - statusBarHeightPx()));
+        windowManager.updateViewLayout(floatingIcon, params);
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
+    private void reopenOverlay() {
+        if (windowManager == null || !isIconMode) return;
+
+        // Remove floating icon
+        if (floatingIcon != null) {
+            windowManager.removeView(floatingIcon);
+            floatingIcon = null;
+        }
+        isIconMode = false;
+
+        // Recreate flutterView
+        FlutterEngine engine = FlutterEngineCache.getInstance().get(OverlayConstants.CACHED_TAG);
+        engine.getLifecycleChannel().appIsResumed();
+        flutterView = new FlutterView(getApplicationContext(), new FlutterTextureView(getApplicationContext()));
+        flutterView.attachToFlutterEngine(engine);
+        flutterView.setFitsSystemWindows(true);
+        flutterView.setFocusable(true);
+        flutterView.setFocusableInTouchMode(true);
+        flutterView.setBackgroundColor(Color.TRANSPARENT);
+        flutterView.setOnTouchListener(this);
+
+        // Recreate buttonContainer (similar to onStartCommand)
+        buttonContainer = new LinearLayout(getApplicationContext());
+        buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
+        buttonContainer.setBackgroundColor(Color.TRANSPARENT);
+
+        ImageView closeIV = getCloseImageView();
+        ImageView invisibleImageView = getInvisibleImageView();
+
+        ImageView moveImageView = getMoveImageView();
+
+        ImageView resizeImageView = getResizeImageView();
+
+        buttonContainer.addView(closeIV);
+        buttonContainer.addView(invisibleImageView);
+        buttonContainer.addView(moveImageView);
+        buttonContainer.addView(resizeImageView);
+
+        // Restore window params
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowSetup.width == -1999 ? -1 : WindowSetup.width,
+                WindowSetup.height != -1999 ? WindowSetup.height : screenHeight(),
+                0,
+                -statusBarHeightPx(),
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
+                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT
+        );
+        params.gravity = WindowSetup.gravity;
+
+        WindowManager.LayoutParams buttonParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                0,
+                0,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+        );
+        buttonParams.gravity = WindowSetup.gravity;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
+            params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
+        }
+
+        windowManager.addView(flutterView, params);
+        windowManager.addView(buttonContainer, buttonParams);
+        flutterView.post(this::updateButtonPosition);
+
+        // Notify Flutter side if needed
+        flutterChannel.invokeMethod("overlayRestored", null);
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         mResources = getApplicationContext().getResources();
@@ -136,7 +314,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
             return START_STICKY;
         }
         closeOverlayWindow(true);
-        Log.d("onStartCommand", "Service started");
+
         FlutterEngine engine = FlutterEngineCache.getInstance().get(OverlayConstants.CACHED_TAG);
         engine.getLifecycleChannel().appIsResumed();
         flutterView = new FlutterView(getApplicationContext(), new FlutterTextureView(getApplicationContext()));
@@ -182,57 +360,60 @@ public class OverlayService extends Service implements View.OnTouchListener {
         buttonContainer.setOrientation(LinearLayout.HORIZONTAL);
         buttonContainer.setBackgroundColor(Color.TRANSPARENT); // Optional: ensure container is transparent
 
-        ImageView closeIV = new ImageView(getApplicationContext());
-        closeIV.setImageResource(R.drawable.icon_menu_chat_close); // Replace with your move icon resource
-        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
-                dpToPx(24), // Width in pixels (adjust as needed)
-                dpToPx(24)  // Height in pixels (adjust as needed)
-        );
-        closeParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
-        closeIV.setLayoutParams(closeParams);
-        closeIV.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                closeOverlayWindow(false);
-            }
-        });
+        ImageView closeIV = getCloseImageView();
+        ImageView invisibleImageView = getInvisibleImageView();
 
-        ImageView moveImageView = new ImageView(getApplicationContext());
-        moveImageView.setImageResource(R.drawable.icon_menu_chat_position); // Replace with your move icon resource
-        LinearLayout.LayoutParams moveParams = new LinearLayout.LayoutParams(
-                dpToPx(24), // Width in pixels (adjust as needed)
-                dpToPx(24)  // Height in pixels (adjust as needed)
-        );
-        moveParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
-        moveImageView.setLayoutParams(moveParams);
-        moveImageView.setOnTouchListener((v, event) -> {
-            WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    moveLastX = event.getRawX();
-                    moveLastY = event.getRawY();
-                    isMoving = true;
-                    return true;
-                case MotionEvent.ACTION_MOVE:
-                    if (isMoving) {
-                        float dx12 = event.getRawX() - moveLastX;
-                        float dy12 = event.getRawY() - moveLastY;
-                        moveLastX = event.getRawX();
-                        moveLastY = event.getRawY();
-                        params.x += dx12;
-                        params.y += dy12;
-                        windowManager.updateViewLayout(flutterView, params);
-                        updateButtonPosition();
-                    }
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    isMoving = false;
-                    return true;
-            }
-            return false;
-        });
+        ImageView moveImageView = getMoveImageView();
 
+        ImageView resizeImageView = getResizeImageView();
+
+        buttonContainer.addView(closeIV);
+        buttonContainer.addView(invisibleImageView);
+        buttonContainer.addView(moveImageView);
+        buttonContainer.addView(resizeImageView);
+
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowSetup.width == -1999 ? -1 : WindowSetup.width,
+                WindowSetup.height != -1999 ? WindowSetup.height : screenHeight(),
+                0,
+                -statusBarHeightPx(),
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
+                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT
+        );
+
+        WindowManager.LayoutParams buttonParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                0,
+                0,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+        );
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
+            params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
+        }
+        params.gravity = WindowSetup.gravity;
+        buttonParams.gravity = WindowSetup.gravity;
+
+        flutterView.setOnTouchListener(this);
+        windowManager.addView(flutterView, params);
+        windowManager.addView(buttonContainer, buttonParams);
+        flutterView.post(this::updateButtonPosition); // 等待 flutterView 布局完成
+        moveOverlay(dx, dy, null);
+//        updateButtonPosition(); // 确保初始位置正确
+        return START_STICKY;
+    }
+
+    @NonNull
+    private ImageView getResizeImageView() {
         ImageView resizeImageView = new ImageView(getApplicationContext());
         resizeImageView.setImageResource(R.drawable.icon_menu_chat_drag);
         LinearLayout.LayoutParams resizeParams = new LinearLayout.LayoutParams(
@@ -278,60 +459,95 @@ public class OverlayService extends Service implements View.OnTouchListener {
             }
             return false;
         });
-
-        buttonContainer.addView(closeIV);
-        buttonContainer.addView(moveImageView);
-        buttonContainer.addView(resizeImageView);
-
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowSetup.width == -1999 ? -1 : WindowSetup.width,
-                WindowSetup.height != -1999 ? WindowSetup.height : screenHeight(),
-                0,
-                -statusBarHeightPx(),
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowSetup.flag | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR
-                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                PixelFormat.TRANSLUCENT
-        );
-
-        WindowManager.LayoutParams buttonParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                0,
-                0,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
-                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
-                        WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT
-        );
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WindowSetup.flag == clickableFlag) {
-            params.alpha = MAXIMUM_OPACITY_ALLOWED_FOR_S_AND_HIGHER;
-        }
-        params.gravity = WindowSetup.gravity;
-        buttonParams.gravity = WindowSetup.gravity;
-
-        flutterView.setOnTouchListener(this);
-        windowManager.addView(flutterView, params);
-        windowManager.addView(buttonContainer, buttonParams);
-        flutterView.post(this::updateButtonPosition); // 等待 flutterView 布局完成
-        moveOverlay(dx, dy, null);
-//        updateButtonPosition(); // 确保初始位置正确
-        return START_STICKY;
+        return resizeImageView;
     }
 
+    @NonNull
+    private ImageView getMoveImageView() {
+        ImageView moveImageView = new ImageView(getApplicationContext());
+        moveImageView.setImageResource(R.drawable.icon_menu_chat_position); // Replace with your move icon resource
+        LinearLayout.LayoutParams moveParams = new LinearLayout.LayoutParams(
+                dpToPx(24), // Width in pixels (adjust as needed)
+                dpToPx(24)  // Height in pixels (adjust as needed)
+        );
+        moveParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
+        moveImageView.setLayoutParams(moveParams);
+        moveImageView.setOnTouchListener((v, event) -> {
+            WindowManager.LayoutParams params = (WindowManager.LayoutParams) flutterView.getLayoutParams();
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    moveLastX = event.getRawX();
+                    moveLastY = event.getRawY();
+                    isMoving = true;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (isMoving) {
+                        float dx12 = event.getRawX() - moveLastX;
+                        float dy12 = event.getRawY() - moveLastY;
+                        moveLastX = event.getRawX();
+                        moveLastY = event.getRawY();
+                        params.x += dx12;
+                        params.y += dy12;
+                        windowManager.updateViewLayout(flutterView, params);
+                        updateButtonPosition();
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    isMoving = false;
+                    return true;
+            }
+            return false;
+        });
+        return moveImageView;
+    }
+
+    @NonNull
+    private ImageView getCloseImageView() {
+        ImageView closeIV = new ImageView(getApplicationContext());
+        closeIV.setImageResource(R.drawable.icon_menu_chat_close); // Replace with your move icon resource
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
+                dpToPx(24), // Width in pixels (adjust as needed)
+                dpToPx(24)  // Height in pixels (adjust as needed)
+        );
+        closeParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
+        closeIV.setLayoutParams(closeParams);
+        closeIV.setOnClickListener(v -> stopSelf());
+        return closeIV;
+    }
+
+    @NonNull
+    private ImageView getInvisibleImageView() {
+        ImageView closeIV = new ImageView(getApplicationContext());
+        closeIV.setImageResource(R.drawable.eye_invisible); // Replace with your move icon resource
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(
+                dpToPx(24), // Width in pixels (adjust as needed)
+                dpToPx(24)  // Height in pixels (adjust as needed)
+        );
+        closeParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
+        closeIV.setLayoutParams(closeParams);
+        closeIV.setOnClickListener(v -> closeOverlayWindow(false));
+        return closeIV;
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     private void closeOverlayWindow(boolean isRunning) {
         if (windowManager != null) {
-            windowManager.removeView(flutterView);
-            windowManager.removeView(buttonContainer);
-            windowManager = null;
-            flutterView.detachFromFlutterEngine();
-            stopSelf();
+            if (flutterView != null) {
+                windowManager.removeView(flutterView);
+                flutterView.detachFromFlutterEngine();
+                flutterView = null;
+            }
+            if (buttonContainer != null) {
+                windowManager.removeView(buttonContainer);
+                buttonContainer = null;
+            }
+
+            // Create and show the floating icon
+            showFloatingIcon();
+            isIconMode = true;
+            OverlayService.isRunning = isRunning;
         }
-        OverlayService.isRunning = isRunning;
     }
 
 
