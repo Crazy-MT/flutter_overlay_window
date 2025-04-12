@@ -145,7 +145,7 @@ public class OverlayService extends Service implements View.OnTouchListener {
     private void showFloatingIcon() {
         floatingIcon = new ImageView(getApplicationContext());
         floatingIcon.setImageResource(R.drawable.visible); // Replace with your icon resource
-        int iconSize = dpToPx(48); // Adjust size as needed
+        int iconSize = dpToPx(36); // Adjust size as needed
 
         WindowManager.LayoutParams iconParams = new WindowManager.LayoutParams(
                 iconSize,

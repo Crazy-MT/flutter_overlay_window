@@ -1,4 +1,6 @@
 import 'dart:developer';
+import 'dart:isolate';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
@@ -32,6 +34,10 @@ class _TrueCallerOverlayState extends State<TrueCallerOverlay> {
   double initialWidth = 300.0;  // 初始宽度
   double initialHeight = 400.0; // 初始高度
 
+  static const String _kPortNameOverlay = 'OVERLAY';
+  final _receivePort = ReceivePort();
+  String? latestMessageFromOverlay;
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +45,18 @@ class _TrueCallerOverlayState extends State<TrueCallerOverlay> {
     // FlutterOverlayWindow.getOverlayPosition().then((value) {
     //   log("Initial Overlay Position: $value");
     // });
+
+    final res = IsolateNameServer.registerPortWithName(
+      _receivePort.sendPort,
+      _kPortNameOverlay,
+    );
+    log("$res: OVERLAY");
+    _receivePort.listen((message) {
+      log("message from OVERLAY: $message");
+      setState(() {
+        latestMessageFromOverlay = 'Latest Message From Overlay: $message';
+      });
+    });
   }
 
   @override
@@ -92,6 +110,7 @@ class _TrueCallerOverlayState extends State<TrueCallerOverlay> {
                       subtitle: const Text("Sousse , Tunisia"),
                     ),
                     const Divider(color: Colors.black54),
+                    Text(latestMessageFromOverlay ?? 'dddd'),
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 12.0),
                       child: Row(
