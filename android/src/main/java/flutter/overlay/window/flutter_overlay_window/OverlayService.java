@@ -5,9 +5,11 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
@@ -28,6 +30,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -709,8 +712,38 @@ public class OverlayService extends Service implements View.OnTouchListener {
         );
         closeParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8)); // Optional: add margins
         closeIV.setLayoutParams(closeParams);
-        closeIV.setOnClickListener(v -> stopSelf());
+        closeIV.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openApp(getApplicationContext(), WindowSetup.packageName);
+                stopSelf();
+            }
+        });
         return closeIV;
+    }
+
+    /**
+     * 尝试打开指定包名的App
+     * @param context Context
+     * @param packageName 目标App的包名
+     */
+    public static void openApp(Context context, String packageName) {
+        PackageManager packageManager = context.getPackageManager();
+        Intent launchIntent = packageManager.getLaunchIntentForPackage(packageName);
+        if (launchIntent != null) {
+            // App 已安装
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); // 推荐添加此 Flag
+            try {
+                context.startActivity(launchIntent);
+            } catch (ActivityNotFoundException e) {
+                Toast.makeText(context, "无法启动目标应用，可能已被禁用或损坏。", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(context, "启动应用时发生错误。", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            // App 未安装
+            Toast.makeText(context, "应用 " + packageName + " 未安装", Toast.LENGTH_LONG).show();
+        }
     }
 
     @NonNull

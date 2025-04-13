@@ -88,6 +88,7 @@ public class FlutterOverlayWindowPlugin implements
             boolean enableDrag = call.argument("enableDrag");
             String positionGravity = call.argument("positionGravity");
             Map<String, Integer> startPosition = call.argument("startPosition");
+            String packageName = call.argument("packageName");
             int startX = startPosition != null ? startPosition.getOrDefault("x", OverlayConstants.DEFAULT_XY) : OverlayConstants.DEFAULT_XY;
             int startY = startPosition != null ? startPosition.getOrDefault("y", OverlayConstants.DEFAULT_XY) : OverlayConstants.DEFAULT_XY;
 
@@ -100,6 +101,7 @@ public class FlutterOverlayWindowPlugin implements
             WindowSetup.overlayTitle = overlayTitle;
             WindowSetup.overlayContent = overlayContent == null ? "" : overlayContent;
             WindowSetup.positionGravity = positionGravity;
+            WindowSetup.packageName = packageName;
             WindowSetup.setNotificationVisibility(notificationVisibility);
 
             final Intent intent = new Intent(context, OverlayService.class);

@@ -10,6 +10,7 @@ import io.flutter.plugin.common.BasicMessageChannel;
 
 public abstract class WindowSetup {
 
+    public static String packageName;
     static int height = WindowManager.LayoutParams.MATCH_PARENT;
     static int width = WindowManager.LayoutParams.MATCH_PARENT;
     static int flag = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
