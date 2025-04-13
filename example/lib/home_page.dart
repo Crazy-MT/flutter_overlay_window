@@ -84,6 +84,10 @@ class _HomePageState extends State<HomePage> {
               onPressed: () async {
                 final status = await FlutterOverlayWindow.isActive();
                 log("Is Active?: $status");
+
+                setState(() {
+                  latestMessageFromOverlay = "Is Active?: $status";
+                });
               },
               child: const Text("Is Active?"),
             ),
